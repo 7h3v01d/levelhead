@@ -3,26 +3,21 @@
 //
 // Real-browser integration harness (Tier 2).
 //
-// Loads the UNPACKED extension into a real Chromium via Puppeteer and verifies
-// Levelhead's eligibility decisions against genuine Web Audio behaviour, using
-// a page-side probe: once the extension has called createMediaElementSource on
-// an element, the page's own createMediaElementSource on that same element
-// throws "already connected" — a browser-truthful signal of ownership.
+// Loads the UNPACKED extension into real Chromium via Puppeteer and verifies
+// Levelhead's irreversible-tap ownership decisions against genuine Web Audio,
+// using a page-side probe: once Levelhead has called createMediaElementSource
+// on an element, the page's own createMediaElementSource on that element throws
+// "already connected" — a browser-truthful signal of ownership.
 //
-// Requirements (run on a machine that has Chrome; NOT runnable in a sandbox
-// without a browser binary):
-//   npm install                      # installs puppeteer + a Chrome for Testing
-//   node test/integration/browser/run.mjs
+// Requirements (a machine WITH Chrome; not runnable in a browserless sandbox):
+//   npm ci                         # installs puppeteer + Chrome for Testing
+//   npm run test:browser
+// If you already have Chrome, set PUPPETEER_EXECUTABLE_PATH and install with
+// PUPPETEER_SKIP_DOWNLOAD=1.
 //
-// If you already have Chrome, set PUPPETEER_EXECUTABLE_PATH to its path and
-// install puppeteer with PUPPETEER_SKIP_DOWNLOAD=1.
-//
-// Notes:
-//   * MV3 extensions require a non-headless context or the new headless
-//     ("--headless=new"); this runner uses headful by default for reliability.
-//   * BFCache / park-revive / gain-authority boundaries are exercised in depth
-//     by the jsdom tier (test/integration/lifecycle.integration.test.mjs);
-//     this tier confirms the eligibility gate under real Chromium.
+// Every case asserts the fixture actually reached HAVE_METADATA before judging
+// tap/no-tap, so "not tapped" can never be a false pass caused by media that
+// simply failed to load.
 
 import http from "node:http";
 import { readFileSync, existsSync } from "node:fs";
@@ -30,12 +25,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, extname } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const EXT_DIR = join(HERE, "..", "..", ".."); // the extension root (has manifest.json)
+const EXT_DIR = join(HERE, "..", "..", "..");     // extension root (manifest.json)
 const FIXTURES = join(HERE, "fixtures");
+const MAIN = 8111, OTHER = 8112;
 
-const MIME = { ".html": "text/html", ".mp4": "video/mp4", ".webm": "video/webm", ".js": "text/javascript" };
+const MIME = {
+  ".html": "text/html", ".wav": "audio/wav",
+  ".webm": "video/webm", ".mp4": "video/mp4", ".js": "text/javascript"
+};
 
-// Two static servers on different ports = two origins (for the cross-origin case).
 function serve(port, rewrite) {
   return new Promise(resolve => {
     const srv = http.createServer((req, res) => {
@@ -44,6 +42,7 @@ function serve(port, rewrite) {
       if (!existsSync(file)) { res.writeHead(404); res.end("nope"); return; }
       let body = readFileSync(file);
       if (rewrite && extname(file) === ".html") body = Buffer.from(rewrite(body.toString()));
+      // No Access-Control-Allow-Origin header anywhere → cross-origin stays no-CORS.
       res.writeHead(200, { "content-type": MIME[extname(file)] || "application/octet-stream" });
       res.end(body);
     });
@@ -54,41 +53,73 @@ function serve(port, rewrite) {
 async function main() {
   let puppeteer;
   try { puppeteer = (await import("puppeteer")).default; }
-  catch { console.error("puppeteer is not installed. Run `npm install` first."); process.exit(2); }
+  catch { console.error("puppeteer is not installed. Run `npm ci` first."); process.exit(2); }
 
-  const OTHER = "http://127.0.0.1:8112";
-  const mainSrv = await serve(8111, html => html.replace("CROSS_ORIGIN_SRC", OTHER + "/media.webm"));
-  const otherSrv = await serve(8112);
+  const mainSrv = await serve(MAIN, html => html.replace("CROSS_ORIGIN_SRC", `http://127.0.0.1:${OTHER}/media.wav`));
+  const otherSrv = await serve(OTHER);
 
   const browser = await puppeteer.launch({
     headless: false,
+    // Let Puppeteer own extension loading. The array form of enableExtensions
+    // installs the unpacked extension via CDP and, for Chrome, requires a
+    // remote-debugging pipe (pipe: true). This replaces the old --load-extension
+    // / --disable-extensions-except flags, which Chrome 137+ removed and which
+    // Puppeteer would override with its default --disable-extensions anyway.
+    pipe: true,
+    enableExtensions: [EXT_DIR],
     args: [
-      `--disable-extensions-except=${EXT_DIR}`,
-      `--load-extension=${EXT_DIR}`,
       "--autoplay-policy=no-user-gesture-required",
       "--no-sandbox"
     ]
   });
 
-  const results = [];
-  const check = (name, cond, extra = "") => { results.push({ name, ok: !!cond, extra }); };
+  // Scope to Levelhead's own service worker, not the first arbitrary one.
+  const swTarget = await browser.waitForTarget(
+    t => t.type() === "service_worker" && t.url().endsWith("/background.js"),
+    { timeout: 10000 }
+  );
+  const sw = await swTarget.worker();
+  const setEnabled = v => sw.evaluate(val => chrome.storage.local.set({ enabled: val }), v);
 
-  async function probe(url, { disableSite = false } = {}) {
+  const results = [];
+  const check = (name, ok, extra = "") => results.push({ name, ok: !!ok, extra });
+
+  async function probe(path, { requireReady = true } = {}) {
     const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "load" });
+    await page.goto(`http://127.0.0.1:${MAIN}/${path}`, { waitUntil: "load" });
+    // Wait until the fixture media has real metadata, so tap decisions are meaningful.
+    let ready = true;
+    try {
+      await page.waitForFunction(() => {
+        const v = document.getElementById("v");
+        return v && v.readyState >= 1; // HAVE_METADATA
+      }, { timeout: 5000 });
+    } catch { ready = false; }
+    const media = await page.evaluate(() => window.__mediaState ? window.__mediaState() : null);
     // Give the content script time to discover + classify + (maybe) tap.
-    await new Promise(r => setTimeout(r, 1500));
-    const r = await page.evaluate(() => window.__levelheadProbe ? window.__levelheadProbe() : { tapped: null });
+    await new Promise(r => setTimeout(r, 1200));
+    const probe = await page.evaluate(() => window.__levelheadProbe ? window.__levelheadProbe() : { tapped: null });
     await page.close();
-    return r;
+    if (requireReady && !ready) throw new Error(`fixture ${path} never reached HAVE_METADATA: ${JSON.stringify(media)}`);
+    return { ready, media, ...probe };
   }
 
   try {
-    const same = await probe("http://127.0.0.1:8111/same-origin.html");
-    check("same-origin media is tapped", same.tapped === true, JSON.stringify(same));
+    const same = await probe("same-origin.html");
+    check("fixture: same-origin media reached HAVE_METADATA", same.ready, JSON.stringify(same.media));
+    check("same-origin eligible media is TAPPED", same.tapped === true, JSON.stringify(same));
 
-    const cross = await probe("http://127.0.0.1:8111/cross-origin.html");
-    check("cross-origin media is NOT tapped", cross.tapped === false, JSON.stringify(cross));
+    const cross = await probe("cross-origin.html");
+    check("fixture: cross-origin media reached HAVE_METADATA", cross.ready, JSON.stringify(cross.media));
+    check("cross-origin media is NOT tapped (refused ownership)", cross.tapped === false, JSON.stringify(cross));
+
+    await setEnabled(false);
+    const off = await probe("off.html");
+    check("fixture: OFF-page media reached HAVE_METADATA", off.ready, JSON.stringify(off.media));
+    check("master OFF does NOT tap untapped media", off.tapped === false, JSON.stringify(off));
+    await setEnabled(true);
+  } catch (e) {
+    check("browser harness ran without fixture/oracle errors", false, String(e && e.message || e));
   } finally {
     await browser.close();
     mainSrv.close(); otherSrv.close();

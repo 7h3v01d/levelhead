@@ -10,7 +10,8 @@ const DEFAULTS = {
   maxCutDb: 12,
   compression: "medium",
   disabledHosts: [],
-  debug: false
+  debug: false,
+  observeOnly: false
 };
 
 const $ = s => document.querySelector(s);
@@ -38,6 +39,7 @@ async function loadSettings() {
   $("#boostVal").textContent = `+${s.maxBoostDb} dB`;
   $("#compression").value = s.compression;
   $("#debug").checked = s.debug;
+  $("#observe").checked = s.observeOnly;
 
   const tab = await activeTab();
   currentHost = hostOf(tab && tab.url);
@@ -55,6 +57,7 @@ const set = (key, value) => chrome.storage.local.set({ [key]: value });
 
 $("#enabled").addEventListener("change", e => set("enabled", e.target.checked));
 $("#debug").addEventListener("change", e => set("debug", e.target.checked));
+$("#observe").addEventListener("change", e => set("observeOnly", e.target.checked));
 $("#targetDb").addEventListener("input", e => {
   $("#targetVal").textContent = `${e.target.value} dB`;
   set("targetDb", Number(e.target.value));
@@ -89,7 +92,13 @@ async function poll() {
   const tab = await activeTab();
   if (!tab) return;
   try {
-    const r = await chrome.tabs.sendMessage(tab.id, { type: "getStats" });
+    // Ask the service worker for the tab's aggregate (deterministic across
+    // frames); fall back to a direct content-script query if it's unavailable.
+    let r = null;
+    try { r = await chrome.runtime.sendMessage({ type: "levelhead:getTab", tabId: tab.id }); } catch {}
+    if (!r || !r.frames) {
+      try { r = await chrome.tabs.sendMessage(tab.id, { type: "getStats" }); } catch {}
+    }
     if (!r) throw new Error("no response");
     $("#loudness").textContent = fmtDb(r.loudnessDb);
     $("#gain").textContent = fmtDb(r.gainDb);
@@ -98,6 +107,7 @@ async function poll() {
     let note = "";
     if (r.siteDisabled) note = "Disabled on this site.";
     else if (!r.enabled) note = "Leveler is off.";
+    else if (r.observe && r.tapped) note = "Observing — not altering audio (GAIN = would apply).";
     else if (r.tapped === 0) note = "No eligible media tapped yet.";
     const skip = skipSummary(r.skips);
     if (skip) note += (note ? "  " : "") + skip;

@@ -97,6 +97,7 @@ export function createEnv({ url = "https://site.example/page", initialSettings =
   const store = { ...initialSettings };
   const changeListeners = [];
   const msgListeners = [];
+  const reports = [];
   win.chrome = {
     storage: {
       local: {
@@ -124,7 +125,8 @@ export function createEnv({ url = "https://site.example/page", initialSettings =
     },
     runtime: {
       getURL(p) { return "chrome-extension://fake/" + p; },
-      onMessage: { addListener(l) { msgListeners.push(l); } }
+      onMessage: { addListener(l) { msgListeners.push(l); } },
+      sendMessage(msg) { reports.push(msg); return Promise.resolve(); }
     }
   };
 
@@ -202,6 +204,8 @@ export function createEnv({ url = "https://site.example/page", initialSettings =
     ctx, sourceOf, wasTapped, agcGainOf, meterOf, meterTick,
     sourceGoesToDestination, sourceGoesToGain,
     getStats, settingsSet, settingsClear, setAddModule,
+    reports: () => reports.slice(),
+    close: () => { try { win.close(); } catch {} },
     sleep, dbToLin,
     DEBOUNCE: 340 // MutationObserver scan debounce (300ms) + async tap slack
   };

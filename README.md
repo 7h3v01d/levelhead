@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Levelhead — Loudness Governor
 
-**v0.1.7 — "Integration Harness"** (runtime unchanged since 0.1.6; adds browser-lifecycle tests)
+**v0.1.10.1 — "Release Verification Closure"**
 
 A Chromium/Vivaldi (Manifest V3) extension that levels the loudness of web
 audio and video so quiet dialogue and booming music sit at a consistent,
@@ -81,6 +81,15 @@ source B ─► AGC ─► comp ─► makeup ─┼─► master input ─► p
 - **OFF means off**: with the master toggle off (or the site disabled),
   untapped media is left completely untouched — no tap occurs. Already-tapped
   elements fall back to transparent bypass.
+- **Observe-only mode**: a toggle that runs the meter and controller and shows
+  the gain Levelhead *would* apply, without touching playback (audio is a
+  transparent passthrough). Same eligibility gate, so it still only taps safe
+  sources. Great for calibration and building trust on an unfamiliar site.
+- **Deterministic cross-frame stats**: each frame's content script reports to a
+  small MV3 service worker (`background.js` + `stats-aggregator.js`), which
+  folds all frames of a tab into one aggregate for the popup. A player in a
+  child frame is counted even when the top frame has no media, and stale frames
+  are pruned by age. No new permissions.
 
 ## Load it (unpacked)
 
@@ -95,6 +104,7 @@ Two tiers, both driven from `package.json`:
 **Unit + jsdom integration (no browser, runs in CI):**
 
 ```
+npm ci            # deterministic install from package-lock.json
 npm test          # unit tests + jsdom lifecycle integration
 ```
 
@@ -110,8 +120,8 @@ npm test          # unit tests + jsdom lifecycle integration
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs `npm test` (unit + jsdom integration) on Node 20
-and 22 for every push and pull request. The browser tier is excluded from CI
+`.github/workflows/ci.yml` runs `npm ci` + `npm test` (unit + jsdom integration)
+on Node 20 and 22 for every push and pull request, with dependency caching. The browser tier is excluded from CI
 (no binary), so nothing needs downloading — Puppeteer's Chromium fetch is
 skipped via `PUPPETEER_SKIP_DOWNLOAD`. Add a status badge with your repo slug:
 
@@ -122,14 +132,17 @@ skipped via `PUPPETEER_SKIP_DOWNLOAD`. Add a status badge with your repo slug:
 **Browser (real Chromium, needs Chrome):**
 
 ```
-npm install && npm run test:browser
+npm ci && npm run test:browser     # npm ci also fetches Chrome for Testing
 ```
 
 `test/integration/browser/run.mjs` loads the unpacked extension into real
-Chromium and verifies the eligibility gate against genuine Web Audio via a
-page-side probe: once Levelhead has tapped an element, the page's own
-`createMediaElementSource` on it throws "already connected". It confirms
-same-origin media is tapped and cross-origin media is not. (This tier needs a
+Chromium and verifies Levelhead's irreversible-tap ownership decisions against
+genuine Web Audio, using a page-side probe: once Levelhead has tapped an
+element, the page's own `createMediaElementSource` on it throws "already
+connected". It serves a real `media.wav` from two origins and **asserts each
+fixture reached `HAVE_METADATA` before judging tap/no-tap**, so "not tapped"
+can't be a false pass from media that never loaded. Three cases: same-origin
+eligible → tapped, cross-origin → not tapped, master OFF → not tapped. (Needs a
 browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 
 ## Known limitations
@@ -148,9 +161,7 @@ browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 
 ## Not done yet (tracked)
 
-- **Popup stats across cross-origin child frames** aren't yet deterministic
-  when the top frame has no media (service-worker aggregator is the fix).
-- **Observe-only mode** and a **post-limiter output meter** are planned.
+- A **post-limiter output meter** (true “what you hear” loudness) is planned.
 - **True-peak limiter**: the master stage is a fast `DynamicsCompressor`, not a
   sample/true-peak brick wall.
 
@@ -159,6 +170,7 @@ browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 | File | Role |
 |------|------|
 | `manifest.json` | MV3 manifest |
+| `LICENSE` | Apache-2.0 license text |
 | `INVARIANTS.md` | The safety laws (LH-INV-01..08) and where each is enforced |
 | `content.js` | Discovery, eligibility, graph wiring, ownership lifecycle |
 | `eligibility.js` | Pure source classifier (browser + Node) |
@@ -166,8 +178,10 @@ browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 | `agc.js` | Pure AGC controller (browser + Node) |
 | `dsp.js` | Pure per-channel, weight-normalised loudness DSP (worklet + Node) |
 | `loudness-processor.js` | AudioWorklet wrapper around `dsp.js` |
+| `background.js` | MV3 service worker: per-tab stats aggregator |
+| `stats-aggregator.js` | Pure per-tab stats aggregation (SW + Node) |
 | `popup.html/.css/.js` | Controls + live readout |
 | `test/*.test.js` | Unit + cross-module regression vectors |
 | `test/integration/` | jsdom lifecycle harness (CI) + Puppeteer browser harness |
-| `package.json` | Test scripts and dev dependencies |
+| `package.json` / `package-lock.json` | Test scripts, dev deps, pinned lockfile |
 | `.github/workflows/ci.yml` | Runs `npm test` (unit + jsdom) on push/PR |

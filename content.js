@@ -18,7 +18,7 @@
 
   const DEFAULTS = {
     enabled: true, targetDb: -24, maxBoostDb: 12, maxCutDb: 12,
-    compression: "medium", disabledHosts: [], debug: false
+    compression: "medium", disabledHosts: [], debug: false, observeOnly: false
   };
   const COMP = {
     off: null,
@@ -68,6 +68,7 @@
     const o = { ...DEFAULTS, ...(s || {}) };
     o.enabled = !!o.enabled;
     o.debug = !!o.debug;
+    o.observeOnly = !!o.observeOnly;
     o.targetDb = clampNum(o.targetDb, -60, -6, DEFAULTS.targetDb);
     o.maxBoostDb = clampNum(o.maxBoostDb, 0, 24, DEFAULTS.maxBoostDb);
     o.maxCutDb = clampNum(o.maxCutDb, 0, 24, DEFAULTS.maxCutDb);
@@ -190,6 +191,7 @@
     LC().markSkipped(r);
     skips[v] = (skips[v] || 0) + 1;
     log("skip", v, "gen", r.gen, el.currentSrc || el.src);
+    scheduleReport();
   }
 
   // ---- tapping -----------------------------------------------------------
@@ -212,7 +214,7 @@
     const chain = {
       el, r, source, gain: null, comp: null, makeup: null, meter: null, silent: null,
       ctrl: globalThis.LevelheadAGC.createController(() => settings),
-      degraded: false, parked: false, compromised: false, bypassed: false, wasActive: false,
+      degraded: false, parked: false, compromised: false, bypassed: false, wasActive: false, observe: false,
       pendingReclassify: false, lastLoudness: null, lastGainDb: 0, metered: false
     };
     r.chain = chain;
@@ -252,6 +254,7 @@
       applyChain(chain);
       if (c.state === "suspended") c.resume().catch(() => {});
       log("chain active; live streams:", liveChains.size);
+      scheduleReport();
     } catch (e) {
       degrade(chain, r, e, "graph construction failed");
     }
@@ -307,12 +310,13 @@
     const v = classifyEl(chain.el, r);
     if (v === "wait") return;
     if (v === "ok") {
-      if (chain.compromised) { chain.compromised = false; log("source recovered to eligible"); applyChain(chain); }
+      if (chain.compromised) { chain.compromised = false; log("source recovered to eligible"); applyChain(chain); scheduleReport(); }
       return;
     }
     if (chain.compromised !== v) {
       chain.compromised = v;
       skips[v] = (skips[v] || 0) + 1;
+      scheduleReport();
       log("post-tap source now", v, "gen", r.gen, "— transparent best-effort");
     }
     // Transparent best effort; keep the meter branch intact so recovery is clean.
@@ -345,7 +349,12 @@
     if (on && !chain.wasActive) hardSafetyReset(chain); // inactive -> active boundary (first tap, OFF->ON, re-enable)
     chain.bypassed = !on;
     chain.wasActive = on;
-    if (!on) { try { source.connect(ctx.destination); } catch {} return; }
+    if (!on) { chain.observe = false; try { source.connect(ctx.destination); } catch {} return; }
+
+    // Observe-only: audio passes through untouched, but the meter still runs
+    // and onLoudness computes (without applying) the gain it WOULD use.
+    if (settings.observeOnly) { chain.observe = true; try { source.connect(ctx.destination); } catch {} return; }
+    chain.observe = false;
 
     const cfg = COMP[settings.compression];
     source.connect(gain);
@@ -367,10 +376,12 @@
   function onLoudness(chain, data) {
     if (chain.bypassed || chain.compromised || chain.parked || chain.degraded || !ctx) return;
     const d = chain.ctrl.step(data);
+    chain.lastGainDb = d.gainDb; // total commanded net gain (or would-be in observe)
+    chain.lastAction = d.action;
+    chain.lastLoudness = Number.isFinite(data.shortTermDb) ? data.shortTermDb : chain.lastLoudness;
+    if (chain.observe) return; // predict only — leave playback untouched
     const physDb = globalThis.LevelheadAGC.renderPhysicalDb(d.gainDb, currentMakeupDb());
     chain.gain.gain.setTargetAtTime(dbToLin(physDb), ctx.currentTime, d.tc);
-    chain.lastGainDb = d.gainDb; // total commanded net gain
-    chain.lastLoudness = Number.isFinite(data.shortTermDb) ? data.shortTermDb : chain.lastLoudness;
   }
 
   function park(chain) {
@@ -382,6 +393,7 @@
       .forEach(n => { try { n.disconnect(); } catch {} });
     try { chain.source.disconnect(); } catch {}
     log("chain parked; live streams:", liveChains.size);
+    scheduleReport();
   }
 
   function revive(chain) {
@@ -401,6 +413,7 @@
     reclassify(chain, chain.r);
     if (!chain.compromised) applyChain(chain);
     log("chain revived; live streams:", liveChains.size);
+    scheduleReport();
   }
 
   // ---- discovery ---------------------------------------------------------
@@ -430,23 +443,44 @@
   })();
 
   // ---- popup stats -------------------------------------------------------
+  function buildStats() {
+    let loudnessDb = null, gainDb = null, count = 0, compromised = 0, degraded = 0;
+    for (const ch of liveChains) {
+      count++;
+      if (ch.compromised) compromised++;
+      if (ch.degraded) degraded++;
+      if (typeof ch.lastLoudness === "number") loudnessDb = ch.lastLoudness;
+      gainDb = ch.lastGainDb;
+    }
+    return {
+      host: TOP_HOST, siteDisabled: siteDisabled(), enabled: settings.enabled,
+      tapped: count, compromised, degraded, skips: { ...skips }, loudnessDb, gainDb,
+      observe: !!settings.observeOnly
+    };
+  }
+
+  // Report this frame's stats to the service worker, which aggregates all
+  // frames of the tab for the popup (deterministic across cross-origin frames).
+  function sendReport() {
+    try {
+      const p = chrome.runtime.sendMessage({ type: "levelhead:report", stats: buildStats() });
+      if (p && typeof p.catch === "function") p.catch(() => {});
+    } catch {}
+  }
+  let reportTimer = null;
+  function scheduleReport() {
+    if (reportTimer) return;
+    reportTimer = setTimeout(() => { reportTimer = null; sendReport(); }, 150);
+  }
+  // Heartbeat so the aggregate stays fresh (and prunes when this frame stops).
+  setInterval(() => { if (liveChains.size > 0 || skips.drm || skips.cors || skips.inuse || skips.unknown) sendReport(); }, 1000);
+
+  // Direct query kept for the jsdom harness / backward compatibility.
   chrome.runtime.onMessage.addListener((msg, _sender, send) => {
     if (msg && msg.type === "getStats") {
       const isTop = window.top === window;
       if (liveChains.size === 0 && !isTop) return false;
-
-      let loudnessDb = null, gainDb = null, count = 0, compromised = 0, degraded = 0;
-      for (const ch of liveChains) {
-        count++;
-        if (ch.compromised) compromised++;
-        if (ch.degraded) degraded++;
-        if (typeof ch.lastLoudness === "number") loudnessDb = ch.lastLoudness;
-        gainDb = ch.lastGainDb;
-      }
-      send({
-        host: TOP_HOST, siteDisabled: siteDisabled(), enabled: settings.enabled,
-        tapped: count, compromised, degraded, skips: { ...skips }, loudnessDb, gainDb
-      });
+      send(buildStats());
     }
     return true;
   });

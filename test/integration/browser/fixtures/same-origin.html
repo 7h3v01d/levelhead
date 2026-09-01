@@ -3,33 +3,27 @@
 <html>
 <head><meta charset="utf-8"><title>same-origin</title></head>
 <body>
-<video id="v" autoplay muted playsinline></video>
+<!-- Real same-origin media so Levelhead's eligibility gate can reach
+     readyState >= HAVE_METADATA and (for a safe origin) tap it. -->
+<audio id="v" src="/media.wav" preload="auto" autoplay muted playsinline></audio>
 <script>
-// Build a same-origin MSE blob source (like YouTube/Facebook) so the element's
-// currentSrc is a same-origin blob: URL the extension will consider eligible.
-// We don't need real media data for the tap decision; a MediaSource blob URL
-// is enough to give the element a same-origin currentSrc.
-(async () => {
+window.__mediaState = () => {
+  const v = document.getElementById('v');
+  return { src: v.currentSrc, readyState: v.readyState, networkState: v.networkState };
+};
+// Page-side ownership probe: if Levelhead already tapped this element, the
+// page's own createMediaElementSource on it throws "already connected".
+window.__levelheadProbe = () => {
   const v = document.getElementById('v');
   try {
-    const ms = new MediaSource();
-    v.src = URL.createObjectURL(ms);
-  } catch (e) { /* older browsers */ }
-
-  // Page-side probe: if the extension already tapped this element, the page's
-  // own createMediaElementSource() throws "already connected". That is our
-  // observable, browser-truthful signal of whether Levelhead owns the element.
-  window.__levelheadProbe = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      ctx.createMediaElementSource(v);
-      ctx.close();
-      return { tapped: false };
-    } catch (e) {
-      return { tapped: true, error: String(e && e.message || e) };
-    }
-  };
-})();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.createMediaElementSource(v);
+    ctx.close();
+    return { tapped: false };
+  } catch (e) {
+    return { tapped: true, error: String(e && e.message || e) };
+  }
+};
 </script>
 </body>
 </html>

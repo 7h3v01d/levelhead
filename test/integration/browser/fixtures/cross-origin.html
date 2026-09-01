@@ -3,24 +3,26 @@
 <html>
 <head><meta charset="utf-8"><title>cross-origin</title></head>
 <body>
-<!-- src points at the OTHER fixture origin without crossorigin → Levelhead must skip -->
-<video id="v" autoplay muted playsinline></video>
+<!-- Media loaded from a DIFFERENT origin with no crossorigin attribute: it
+     plays fine (reaches HAVE_METADATA) but Levelhead must refuse to tap it,
+     because tapping a CORS-cross-origin source would output silence. -->
+<audio id="v" src="CROSS_ORIGIN_SRC" preload="auto" autoplay muted playsinline></audio>
 <script>
-(() => {
+window.__mediaState = () => {
   const v = document.getElementById('v');
-  // The runner rewrites CROSS_ORIGIN_SRC to the second origin's media URL.
-  v.src = "CROSS_ORIGIN_SRC";
-  window.__levelheadProbe = () => {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      ctx.createMediaElementSource(v);
-      ctx.close();
-      return { tapped: false };
-    } catch (e) {
-      return { tapped: true, error: String(e && e.message || e) };
-    }
-  };
-})();
+  return { src: v.currentSrc, readyState: v.readyState, networkState: v.networkState };
+};
+window.__levelheadProbe = () => {
+  const v = document.getElementById('v');
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.createMediaElementSource(v);
+    ctx.close();
+    return { tapped: false };
+  } catch (e) {
+    return { tapped: true, error: String(e && e.message || e) };
+  }
+};
 </script>
 </body>
 </html>

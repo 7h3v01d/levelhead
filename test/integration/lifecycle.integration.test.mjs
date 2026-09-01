@@ -14,8 +14,9 @@ const SAME = "https://site.example/clip.mp4";
 const BLOB = "blob:https://site.example/uuid";
 const CROSS = "https://cdn.other/clip.mp4";
 
-test("same-origin media is tapped and processed", async () => {
+test("same-origin media is tapped and processed", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   assert.ok(env.wasTapped(el), "should have tapped");
@@ -23,38 +24,43 @@ test("same-origin media is tapped and processed", async () => {
   assert.equal(env.getStats().tapped, 1);
 });
 
-test("MSE blob (same-origin) is tapped", async () => {
+test("MSE blob (same-origin) is tapped", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: BLOB });
   await env.sleep(env.DEBOUNCE);
   assert.ok(env.wasTapped(el));
 });
 
-test("cross-origin without CORS is skipped, native path untouched", async () => {
+test("cross-origin without CORS is skipped, native path untouched", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: CROSS });
   await env.sleep(env.DEBOUNCE);
   assert.ok(!env.wasTapped(el), "must NOT tap cross-origin");
   assert.ok(env.getStats().skips.cors >= 1);
 });
 
-test("cross-origin WITH crossorigin=anonymous is tapped", async () => {
+test("cross-origin WITH crossorigin=anonymous is tapped", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: CROSS, crossOrigin: "anonymous" });
   await env.sleep(env.DEBOUNCE);
   assert.ok(env.wasTapped(el));
 });
 
-test("DRM (mediaKeys) is skipped", async () => {
+test("DRM (mediaKeys) is skipped", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME, mediaKeys: {} });
   await env.sleep(env.DEBOUNCE);
   assert.ok(!env.wasTapped(el));
   assert.ok(env.getStats().skips.drm >= 1);
 });
 
-test("an 'encrypted' event before commitment prevents the tap", async () => {
+test("an 'encrypted' event before commitment prevents the tap", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME, readyState: 0 }); // not classifiable yet
   await env.sleep(env.DEBOUNCE);                          // listeners attach, verdict = wait
   env.fire(el, "encrypted");                              // DRM observed for THIS generation
@@ -65,8 +71,9 @@ test("an 'encrypted' event before commitment prevents the tap", async () => {
   assert.ok(env.getStats().skips.drm >= 1);
 });
 
-test("source replacement: eligible → cross-origin (compromised) → eligible (recovered)", async () => {
+test("source replacement: eligible → cross-origin (compromised) → eligible (recovered)", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   assert.ok(env.sourceGoesToGain(el));
@@ -82,8 +89,9 @@ test("source replacement: eligible → cross-origin (compromised) → eligible (
   assert.ok(env.sourceGoesToGain(el));
 });
 
-test("detach parks the chain; reattach revives it", async () => {
+test("detach parks the chain; reattach revives it", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   assert.equal(env.getStats().tapped, 1);
@@ -100,8 +108,9 @@ test("detach parks the chain; reattach revives it", async () => {
   assert.ok(env.sourceGoesToGain(el));
 });
 
-test("master OFF before discovery does not tap; enabling then taps", async () => {
+test("master OFF before discovery does not tap; enabling then taps", async (t) => {
   const env = createEnv({ initialSettings: { enabled: false } });
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   assert.ok(!env.wasTapped(el), "OFF must not tap untapped media");
@@ -111,8 +120,9 @@ test("master OFF before discovery does not tap; enabling then taps", async () =>
   assert.ok(env.wasTapped(el), "enabling should tap");
 });
 
-test("worklet load failure degrades to tracked passthrough (still owned)", async () => {
+test("worklet load failure degrades to tracked passthrough (still owned)", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   env.setAddModule("reject");
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
@@ -121,8 +131,9 @@ test("worklet load failure degrades to tracked passthrough (still owned)", async
   assert.ok(env.getStats().degraded >= 1);
 });
 
-test("BFCache: pagehide[persisted] does NOT close; pageshow re-warms; real unload closes", async () => {
+test("BFCache: pagehide[persisted] does NOT close; pageshow re-warms; real unload closes", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   const ctx = env.ctx();
@@ -140,8 +151,9 @@ test("BFCache: pagehide[persisted] does NOT close; pageshow re-warms; real unloa
   assert.equal(ctx.closeCount, 1, "real unload closes the context");
 });
 
-test("source change hard-resets gain immediately (no glide, <= unity)", async () => {
-  const env = createEnv(); // default compression medium (makeup +3)
+test("source change hard-resets gain immediately (no glide, <= unity)", async (t) => {
+  const env = createEnv();
+  t.after(() => env.close()); // default compression medium (makeup +3)
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
 
@@ -154,8 +166,9 @@ test("source change hard-resets gain immediately (no glide, <= unity)", async ()
   assert.ok(g.value <= 1 + 1e-9, "physical AGC node must be <= unity at the boundary");
 });
 
-test("lowering Max boost while boosted is immediately authoritative (no meter needed)", async () => {
+test("lowering Max boost while boosted is immediately authoritative (no meter needed)", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
 
@@ -168,10 +181,61 @@ test("lowering Max boost while boosted is immediately authoritative (no meter ne
   assert.ok(g.value <= 1 + 1e-9, "net authority must drop to <= 0 immediately");
 });
 
-test("clearing storage mid-session does not throw and keeps stats working", async () => {
+test("clearing storage mid-session does not throw and keeps stats working", async (t) => {
   const env = createEnv();
+  t.after(() => env.close());
   const el = env.addMedia({ src: SAME });
   await env.sleep(env.DEBOUNCE);
   assert.doesNotThrow(() => env.settingsClear());
   assert.ok(env.getStats(), "stats still respond after a storage clear");
+});
+
+test("content reports its stats to the service worker after a tap", async (t) => {
+  const env = createEnv();
+  t.after(() => env.close());
+  env.addMedia({ src: SAME });
+  await env.sleep(env.DEBOUNCE);
+  await env.sleep(200); // scheduleReport debounce (150 ms)
+  const reports = env.reports().filter(m => m.type === "levelhead:report");
+  assert.ok(reports.length >= 1, "should report to the SW");
+  assert.ok(reports.at(-1).stats.tapped >= 1);
+});
+
+test("a skipped source is reported with its skip reason", async (t) => {
+  const env = createEnv();
+  t.after(() => env.close());
+  env.addMedia({ src: CROSS });
+  await env.sleep(env.DEBOUNCE);
+  await env.sleep(200);
+  const reports = env.reports().filter(m => m.type === "levelhead:report");
+  assert.ok(reports.length >= 1);
+  assert.ok(reports.at(-1).stats.skips.cors >= 1);
+});
+
+test("observe-only: audio passes through untouched but the gain is predicted", async (t) => {
+  const env = createEnv({ initialSettings: { observeOnly: true } });
+  t.after(() => env.close());
+  const el = env.addMedia({ src: SAME });
+  await env.sleep(env.DEBOUNCE);
+
+  assert.ok(env.wasTapped(el), "still taps eligible media to measure it");
+  assert.ok(env.sourceGoesToDestination(el), "audio is a transparent passthrough");
+  assert.ok(!env.sourceGoesToGain(el), "audio does NOT flow through the AGC gain node");
+
+  for (let i = 0; i < 14; i++) env.meterTick(el, -40, -40); // quiet → would lift
+  const s = env.getStats();
+  assert.equal(s.observe, true);
+  assert.ok(s.gainDb > 0, "should report a positive would-apply gain without applying it");
+});
+
+test("toggling observe-only OFF starts actually processing", async (t) => {
+  const env = createEnv({ initialSettings: { observeOnly: true } });
+  t.after(() => env.close());
+  const el = env.addMedia({ src: SAME });
+  await env.sleep(env.DEBOUNCE);
+  assert.ok(!env.sourceGoesToGain(el));
+
+  env.settingsSet({ observeOnly: false });
+  await env.sleep(20);
+  assert.ok(env.sourceGoesToGain(el), "processing engages when observe-only is turned off");
 });
