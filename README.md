@@ -108,6 +108,17 @@ npm test          # unit tests + jsdom lifecycle integration
   →revive, master-OFF-before-tap, worklet-failure degrade, BFCache restore,
   hard gain reset at source/settings boundaries, storage clear.
 
+### Continuous integration
+
+`.github/workflows/ci.yml` runs `npm test` (unit + jsdom integration) on Node 20
+and 22 for every push and pull request. The browser tier is excluded from CI
+(no binary), so nothing needs downloading — Puppeteer's Chromium fetch is
+skipped via `PUPPETEER_SKIP_DOWNLOAD`. Add a status badge with your repo slug:
+
+```
+![CI](https://github.com/<owner>/<repo>/actions/workflows/ci.yml/badge.svg)
+```
+
 **Browser (real Chromium, needs Chrome):**
 
 ```
@@ -159,3 +170,4 @@ browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 | `test/*.test.js` | Unit + cross-module regression vectors |
 | `test/integration/` | jsdom lifecycle harness (CI) + Puppeteer browser harness |
 | `package.json` | Test scripts and dev dependencies |
+| `.github/workflows/ci.yml` | Runs `npm test` (unit + jsdom) on push/PR |
