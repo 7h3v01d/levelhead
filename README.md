@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Levelhead — Loudness Governor
 
-**v0.1.5 — "Whole-Graph Gain Authority"**
+**v0.1.7 — "Integration Harness"** (runtime unchanged since 0.1.6; adds browser-lifecycle tests)
 
 A Chromium/Vivaldi (Manifest V3) extension that levels the loudness of web
 audio and video so quiet dialogue and booming music sit at a consistent,
@@ -67,8 +67,12 @@ source B ─► AGC ─► comp ─► makeup ─┼─► master input ─► p
   included — and the popup **GAIN** is the honest total. At every uncertainty
   boundary the physical node is hard-set (no glide) to `≤ unity` before the
   graph reconnects, so boost can't leak across a source change, revive, OFF→ON,
-  or BFCache restore. Startup **fails closed**; corrupt/cleared settings are
-  sanitised on ingest. See `INVARIANTS.md`.
+  or BFCache restore. Changing compression or Max boost is a **settings authority
+  boundary**: gain is reconciled (excess authority capped, physical node
+  re-rendered for the new makeup) atomically before the new graph produces
+  audio, so a live config change can't transiently exceed Max boost. Startup
+  **fails closed**; corrupt/cleared settings are sanitised on ingest. See
+  `INVARIANTS.md`.
 - **Shared per-frame master protection limiter**: all streams *in a frame* feed
   one limiter, so the summed output of that frame has a single protection stage.
   Because content scripts run per frame, each frame has its own context and
@@ -86,22 +90,36 @@ source B ─► AGC ─► comp ─► makeup ─┼─► master input ─► p
 
 ## Tests
 
+Two tiers, both driven from `package.json`:
+
+**Unit + jsdom integration (no browser, runs in CI):**
+
 ```
-node --test        # from the project root, no dependencies
+npm test          # unit tests + jsdom lifecycle integration
 ```
 
-- `test/agc.test.js` — controller: duck/lift, clamps, gate, keep-cut, warmup,
-  and `safetyReset` (positive gain revoked, protective cut preserved).
-- `test/dsp.test.js` — meter: mono, dual-mono, anti-phase, L/R-only, silence,
-  reset, and the cold-start-no-false-lift safety vector (dsp + agc together).
-- `test/eligibility.test.js` — classification incl. lifetime source
-  replacement (eligible → cross-origin → DRM → eligible).
-- `test/lifecycle.test.js` — source-generation state: DRM/skip scoped to a
-  generation, `safe → DRM → safe` and `skipped → safe` recovery.
+- `test/*.test.js` — pure logic: AGC controller (duck/lift, clamps, gate,
+  keep-cut, warmup, safetyReset, whole-graph authority, settings transitions),
+  per-channel loudness DSP, source-generation records, eligibility classifier.
+- `test/integration/lifecycle.integration.test.mjs` — the **real** `content.js`
+  in jsdom with a controllable mock of Web Audio + `chrome.*`, driving the
+  actual lifecycle: same-origin tap, cross-origin/DRM skip, `encrypted` before
+  commitment, source replacement (compromise + recovery), detach→park→reattach
+  →revive, master-OFF-before-tap, worklet-failure degrade, BFCache restore,
+  hard gain reset at source/settings boundaries, storage clear.
 
-These cover the logic modules. Cross-module **browser** lifecycle (park/revive
-across real detach/reattach, live CORS/DRM source swaps, worklet-init failure)
-still needs a Chromium-driven harness — see "Not done yet".
+**Browser (real Chromium, needs Chrome):**
+
+```
+npm install && npm run test:browser
+```
+
+`test/integration/browser/run.mjs` loads the unpacked extension into real
+Chromium and verifies the eligibility gate against genuine Web Audio via a
+page-side probe: once Levelhead has tapped an element, the page's own
+`createMediaElementSource` on it throws "already connected". It confirms
+same-origin media is tapped and cross-origin media is not. (This tier needs a
+browser binary; the jsdom tier is the CI-runnable proof of the same logic.)
 
 ## Known limitations
 
@@ -119,18 +137,18 @@ still needs a Chromium-driven harness — see "Not done yet".
 
 ## Not done yet (tracked)
 
-- **Browser integration harness** (Puppeteer/Chromium) for the lifecycle cases
-  above — the highest-value next testing tier.
 - **Popup stats across cross-origin child frames** aren't yet deterministic
   when the top frame has no media (service-worker aggregator is the fix).
 - **Observe-only mode** and a **post-limiter output meter** are planned.
+- **True-peak limiter**: the master stage is a fast `DynamicsCompressor`, not a
+  sample/true-peak brick wall.
 
 ## Files
 
 | File | Role |
 |------|------|
 | `manifest.json` | MV3 manifest |
-| `INVARIANTS.md` | The safety laws (LH-INV-01..07) and where each is enforced |
+| `INVARIANTS.md` | The safety laws (LH-INV-01..08) and where each is enforced |
 | `content.js` | Discovery, eligibility, graph wiring, ownership lifecycle |
 | `eligibility.js` | Pure source classifier (browser + Node) |
 | `lifecycle.js` | Pure per-element source-generation record (browser + Node) |
@@ -139,3 +157,5 @@ still needs a Chromium-driven harness — see "Not done yet".
 | `loudness-processor.js` | AudioWorklet wrapper around `dsp.js` |
 | `popup.html/.css/.js` | Controls + live readout |
 | `test/*.test.js` | Unit + cross-module regression vectors |
+| `test/integration/` | jsdom lifecycle harness (CI) + Puppeteer browser harness |
+| `package.json` | Test scripts and dev dependencies |

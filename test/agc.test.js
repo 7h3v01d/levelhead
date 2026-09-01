@@ -159,3 +159,52 @@ test("whole-graph authority: Max boost caps the whole graph, makeup can't exceed
   assert.ok(d.gainDb <= 0);
   assert.ok(AGC.renderPhysicalDb(d.gainDb, 5) + 5 <= 0 + 1e-9);
 });
+
+// --- Settings authority boundary: live config transitions (LH-INV-08) ---
+// Model the reconcile content.js performs on a settings change: cap existing
+// positive authority to the new Max boost, then render the physical AGC node
+// for the new makeup. Net = physical + makeup must never exceed Max boost.
+function reconciledNet(ctrl, maxBoostDb, makeupDb) {
+  const commanded = ctrl.capPositiveAuthority(maxBoostDb);
+  return { commanded, net: AGC.renderPhysicalDb(commanded, makeupDb) + makeupDb };
+}
+
+test("Medium → Strong with zero boost never lets net exceed 0", () => {
+  const c = AGC.createController(() => S({ maxBoostDb: 0 }));
+  c.reset(0, 0);                                  // commanded 0 under Medium (makeup 3)
+  const r = reconciledNet(c, 0, 5);               // switch to Strong (makeup 5)
+  assert.ok(r.net <= 1e-9, `net ${r.net} > 0`);
+  assert.equal(r.commanded, 0);
+});
+
+test("Off → Strong at max boost never lets net exceed +12", () => {
+  const c = AGC.createController(() => S({ maxBoostDb: 12 }));
+  c.reset(12, 0);                                 // commanded +12 under Off (makeup 0)
+  const r = reconciledNet(c, 12, 5);              // switch to Strong (makeup 5)
+  assert.ok(r.net <= 12 + 1e-9, `net ${r.net} > 12`);
+});
+
+test("lowering Max boost while boosted is immediately authoritative", () => {
+  const c = AGC.createController(() => S({ maxBoostDb: 0 }));
+  c.reset(12, 0);                                 // legitimately earned +12
+  const r = reconciledNet(c, 0, 3);               // Max boost 12 → 0
+  assert.equal(c.gainDb, 0, "controller command not capped immediately");
+  assert.ok(r.net <= 1e-9);
+});
+
+test("lowering Max boost during silence still caps immediately (no meter needed)", () => {
+  const c = AGC.createController(() => S({ maxBoostDb: 0 }));
+  c.reset(12, 0);
+  const capped = c.capPositiveAuthority(0);       // no step()/measurement involved
+  assert.equal(capped, 0);
+  assert.equal(c.gainDb, 0);
+});
+
+test("compression change during warmup keeps net <= 0 and preserves warmup", () => {
+  const c = AGC.createController(() => S({ maxBoostDb: 12 }));
+  c.reset(0, 8);                                  // warmup armed, command 0
+  const r = reconciledNet(c, 12, 5);              // change compression mid-warmup
+  assert.ok(r.net <= 1e-9, `net ${r.net} > 0`);
+  const d = c.step({ momentaryDb: -34, shortTermDb: -34 }); // quiet → must NOT lift (warmup)
+  assert.notEqual(d.action, "lift");
+});

@@ -1,0 +1,26 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>cross-origin</title></head>
+<body>
+<!-- src points at the OTHER fixture origin without crossorigin → Levelhead must skip -->
+<video id="v" autoplay muted playsinline></video>
+<script>
+(() => {
+  const v = document.getElementById('v');
+  // The runner rewrites CROSS_ORIGIN_SRC to the second origin's media URL.
+  v.src = "CROSS_ORIGIN_SRC";
+  window.__levelheadProbe = () => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      ctx.createMediaElementSource(v);
+      ctx.close();
+      return { tapped: false };
+    } catch (e) {
+      return { tapped: true, error: String(e && e.message || e) };
+    }
+  };
+})();
+</script>
+</body>
+</html>

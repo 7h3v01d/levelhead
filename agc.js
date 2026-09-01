@@ -97,6 +97,13 @@
         warmup = Math.max(0, warmupSteps | 0);
         return gainDb;
       },
+      // Settings boundary: an existing positive command may not exceed a newly
+      // lowered Max boost. Lowers excess authority immediately (never raises,
+      // never touches a protective cut or the warmup). Returns the new command.
+      capPositiveAuthority(maxBoostDb) {
+        if (gainDb > maxBoostDb) gainDb = maxBoostDb;
+        return gainDb;
+      },
       step(meas) {
         const d = decide(gainDb, getSettings(), meas, { allowLift: warmup <= 0 });
         gainDb = d.gainDb;

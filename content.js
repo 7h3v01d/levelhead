@@ -85,7 +85,9 @@
     const merged = { ...settings };
     for (const k of Object.keys(changes)) merged[k] = changes[k].newValue === undefined ? DEFAULTS[k] : changes[k].newValue;
     settings = sanitize(merged);
-    for (const chain of liveChains) applyChain(chain);
+    // Settings authority boundary: reconcile gain BEFORE rewiring, so a new
+    // makeup or a lowered Max boost is authoritative before it produces audio.
+    for (const chain of liveChains) { reconcileGainAuthority(chain); applyChain(chain); }
     scan();
   });
 
@@ -270,6 +272,21 @@
       try { p.setValueAtTime(dbToLin(physDb), now); } catch {}
     }
     chain.lastGainDb = keep; // total commanded (honest popup readout)
+  }
+
+  // Settings authority boundary: a new Max boost or makeup value must become
+  // authoritative BEFORE its graph produces audio. Cap existing positive
+  // authority to the new limit, then re-render the physical AGC node for the
+  // new makeup so net gain never transiently exceeds Max boost (LH-INV-08).
+  function reconcileGainAuthority(chain) {
+    if (!chain.gain || !ctx || chain.parked || chain.compromised || chain.degraded) return;
+    const commanded = chain.ctrl.capPositiveAuthority(settings.maxBoostDb);
+    const physDb = globalThis.LevelheadAGC.renderPhysicalDb(commanded, currentMakeupDb());
+    const p = chain.gain.gain;
+    const now = ctx.currentTime;
+    try { p.cancelAndHoldAtTime(now); } catch { try { p.cancelScheduledValues(now); } catch {} }
+    try { p.setValueAtTime(dbToLin(physDb), now); } catch {}
+    chain.lastGainDb = commanded;
   }
 
   // Owned but unprocessable: drop any partial nodes and fall back to a tracked

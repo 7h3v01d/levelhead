@@ -45,11 +45,17 @@ effective commanded gain exceed `maxBoostDb`, and must be `<= 0` at every
 uncertainty boundary. Enforced by treating the controller's gain as the TOTAL
 commanded gain and rendering the physical AGC node as `commanded - makeupDb`
 (`renderPhysicalDb`), so net gain always equals commanded. `Max boost = 0`
-therefore means zero amplification, makeup included.
+therefore means zero amplification, makeup included. Changing compression or
+Max boost is a settings authority boundary: `reconcileGainAuthority` caps
+existing authority and re-renders the physical node for the new makeup before
+the new graph produces audio, so a live change never transiently exceeds the
+limit.
 
 ## Physical-vs-logical authority
 
 The controller's `gainDb` is advisory; the **GainNode is authoritative**. At
 every boundary the node is hard-set with `setValueAtTime` (after
-`cancelAndHoldAtTime`), never eased with `setTargetAtTime`, so the graph can
-never briefly amplify a source the controller already believes it has revoked.
+`cancelAndHoldAtTime`), never eased with `setTargetAtTime`. The boundaries are: source change, revive,
+OFF→ON / site re-enable, BFCache restore, and settings change (compression /
+Max boost). At none of them can the graph briefly amplify beyond what the
+controller authorises.

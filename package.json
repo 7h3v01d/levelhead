@@ -1,0 +1,18 @@
+{
+  "name": "levelhead",
+  "version": "0.1.7",
+  "description": "Safety-first browser loudness governor (Chromium/Vivaldi MV3 extension).",
+  "author": "Leon Priest",
+  "license": "Apache-2.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js test/integration/*.test.mjs",
+    "test:unit": "node --test test/*.test.js",
+    "test:integration": "node --test test/integration/*.test.mjs",
+    "test:browser": "node test/integration/browser/run.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "puppeteer": "^23.0.0"
+  }
+}
