@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Levelhead \u2014 Loudness Governor",
+  "version": "0.1.5",
+  "description": "A safety-first browser loudness governor: levels quiet dialogue and loud music to a comfortable, consistent level, and steps aside when it can't process a stream safely.",
+  "author": "Leon Priest",
+  "minimum_chrome_version": "94",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "agc.js",
+        "eligibility.js",
+        "lifecycle.js",
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dsp.js",
+        "loudness-processor.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Levelhead"
+  }
+}

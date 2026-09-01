@@ -1,0 +1,67 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2026 Leon Priest (github: 7h3v01d) -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="title">LEVELHEAD</span>
+    <label class="switch">
+      <input type="checkbox" id="enabled" />
+      <span class="track"></span>
+    </label>
+  </header>
+
+  <section class="readout">
+    <div class="cell">
+      <span class="k">INPUT</span>
+      <span class="v" id="loudness">—</span>
+    </div>
+    <div class="cell">
+      <span class="k">GAIN</span>
+      <span class="v" id="gain">—</span>
+    </div>
+    <div class="cell">
+      <span class="k">STREAMS</span>
+      <span class="v" id="tapped">—</span>
+    </div>
+  </section>
+  <div class="status" id="status"></div>
+
+  <section class="controls">
+    <div class="row">
+      <label for="targetDb">Target loudness</label>
+      <span class="num" id="targetVal"></span>
+      <input type="range" id="targetDb" min="-40" max="-12" step="1" />
+    </div>
+    <div class="row">
+      <label for="maxBoostDb">Max boost</label>
+      <span class="num" id="boostVal"></span>
+      <input type="range" id="maxBoostDb" min="0" max="24" step="1" />
+    </div>
+    <div class="row">
+      <label for="compression">Compression</label>
+      <select id="compression">
+        <option value="off">Off</option>
+        <option value="gentle">Gentle</option>
+        <option value="medium">Medium</option>
+        <option value="strong">Strong</option>
+      </select>
+    </div>
+    <div class="row check">
+      <label for="debug">Diagnostics log</label>
+      <input type="checkbox" id="debug" />
+    </div>
+  </section>
+
+  <footer>
+    <span class="host" id="host">—</span>
+    <button id="siteToggle" class="ghost">Disable here</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>
