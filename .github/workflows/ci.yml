@@ -20,12 +20,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
 
-      # Install dev deps (jsdom for the integration tier). Skip Puppeteer's
-      # Chromium download — the browser tier is not run in CI, only the
-      # jsdom + unit tiers, which need no browser binary.
+      # Deterministic install from the committed lockfile. Skip Puppeteer's
+      # Chromium download — CI runs only the unit + jsdom tiers, no browser.
       - name: Install
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
         env:
           PUPPETEER_SKIP_DOWNLOAD: "1"
 
