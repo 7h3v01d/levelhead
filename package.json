@@ -1,6 +1,6 @@
 {
   "name": "levelhead",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Safety-first browser loudness governor (Chromium/Vivaldi MV3 extension).",
   "author": "Leon Priest",
   "license": "Apache-2.0",

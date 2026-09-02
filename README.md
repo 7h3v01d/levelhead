@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Levelhead — Loudness Governor
 
-**v0.1.10.1 — "Release Verification Closure"**
+**v0.1.11 — "Version Sync"** — version strings unified across manifest/package;
+no runtime changes since the frozen **0.1.10.1** baseline.
 
 A Chromium/Vivaldi (Manifest V3) extension that levels the loudness of web
 audio and video so quiet dialogue and booming music sit at a consistent,
